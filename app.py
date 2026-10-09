@@ -1,55 +1,76 @@
 import os
+import shutil
 import tempfile
 from urllib.parse import urlparse
 
-from flask import Flask, request, send_file, jsonify, after_this_request
+from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
 import yt_dlp
 
 app = Flask(__name__)
 
-CORS(
-    app,
-    resources={
-        r"/download": {
-            "origins": [
-                "https://toolsmediadownload.online",
-                "https://www.toolsmediadownload.online",
-            ]
-        }
-    },
-)
+ALLOWED_ORIGINS = [
+    "https://toolsmediadownload.online",
+    "https://www.toolsmediadownload.online",
+]
 
-def valid_instagram_url(url):
+CORS(app, resources={r"/download": {"origins": ALLOWED_ORIGINS}})
+
+INSTAGRAM_HOSTS = {
+    "instagram.com",
+    "www.instagram.com",
+}
+
+FACEBOOK_HOSTS = {
+    "facebook.com",
+    "www.facebook.com",
+    "m.facebook.com",
+    "web.facebook.com",
+    "fb.watch",
+    "fb.com",
+    "www.fb.com",
+}
+
+
+def get_platform(url):
     try:
         parsed = urlparse(url)
         host = (parsed.hostname or "").lower()
 
-        return (
-            parsed.scheme == "https"
-            and host in {"instagram.com", "www.instagram.com"}
-            and parsed.path.startswith(("/p/", "/reel/", "/reels/", "/tv/"))
-        )
+        if parsed.scheme != "https":
+            return None
+
+        if host in INSTAGRAM_HOSTS:
+            if parsed.path.startswith(("/p/", "/reel/", "/reels/", "/tv/")):
+                return "instagram"
+
+        if host in FACEBOOK_HOSTS:
+            if parsed.path != "/":
+                return "facebook"
+
+        return None
+
     except Exception:
-        return False
+        return None
 
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Instagram Downloader backend is running!"
+    return "Instagram and Facebook Downloader backend is running!"
 
 
 @app.route("/download", methods=["POST"])
 def download_video():
     data = request.get_json(silent=True) or {}
     url = (data.get("url") or "").strip()
+    platform = get_platform(url)
 
-    if not valid_instagram_url(url):
+    if not platform:
         return jsonify({
-            "error": "Valid public Instagram post ya Reel ka link dein."
+            "error": "Valid public Instagram ya Facebook video link dein."
         }), 400
 
-    temp_dir = tempfile.mkdtemp(prefix="instagram_")
+    temp_dir = tempfile.mkdtemp(prefix="media_download_")
 
     try:
         options = {
@@ -58,7 +79,7 @@ def download_video():
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
-            "socket_timeout": 20,
+            "socket_timeout": 30,
             "max_filesize": 100 * 1024 * 1024,
         }
 
@@ -75,30 +96,35 @@ def download_video():
             raise RuntimeError("Video file nahi mili.")
 
         video_path = files[0]
+        extension = os.path.splitext(video_path)[1] or ".mp4"
+        filename = f"{platform}_video{extension}"
 
-        @after_this_request
-        def cleanup(response):
-            import shutil
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            return response
-
-        return send_file(
+        response = send_file(
             video_path,
             as_attachment=True,
-            download_name="instagram_video.mp4",
+            download_name=filename,
         )
 
+        response.call_on_close(
+            lambda: shutil.rmtree(temp_dir, ignore_errors=True)
+        )
+
+        return response
+
     except Exception:
-        import shutil
         shutil.rmtree(temp_dir, ignore_errors=True)
 
         return jsonify({
             "error": (
-                "Video download nahi ho saki. Link check karein; "
-                "kuch Instagram posts available nahi hoti."
+                "Video download nahi ho saki. Public link check karein. "
+                "Kuch videos login, privacy ya platform restrictions ki "
+                "wajah se available nahi hoti."
             )
         }), 400
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000))
+    )
