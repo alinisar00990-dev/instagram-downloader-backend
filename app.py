@@ -31,6 +31,14 @@ FACEBOOK_HOSTS = {
     "www.fb.com",
 }
 
+PINTEREST_HOSTS = {
+    "pinterest.com",
+    "www.pinterest.com",
+    "m.pinterest.com",
+    "in.pinterest.com",
+    "pin.it",
+}
+
 
 def get_platform(url):
     try:
@@ -48,6 +56,10 @@ def get_platform(url):
             if parsed.path != "/":
                 return "facebook"
 
+        if host in PINTEREST_HOSTS:
+            if host == "pin.it" or parsed.path.startswith("/pin/"):
+                return "pinterest"
+
         return None
 
     except Exception:
@@ -56,7 +68,7 @@ def get_platform(url):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Instagram and Facebook Downloader backend is running!"
+    return "Instagram, Facebook and Pinterest downloader backend is running!"
 
 
 @app.route("/download", methods=["POST"])
@@ -67,7 +79,7 @@ def download_video():
 
     if not platform:
         return jsonify({
-            "error": "Valid public Instagram ya Facebook video link dein."
+            "error": "Valid public Instagram, Facebook ya Pinterest video link dein."
         }), 400
 
     temp_dir = tempfile.mkdtemp(prefix="media_download_")
@@ -113,6 +125,8 @@ def download_video():
 
     except Exception:
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+        app.logger.exception("Media download failed for platform: %s", platform)
 
         return jsonify({
             "error": (
